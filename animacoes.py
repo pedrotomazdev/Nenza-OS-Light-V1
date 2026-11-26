@@ -1,13 +1,14 @@
 from framebuf import FrameBuffer, MONO_VLSB
-from time import gmtime
+from math import sin
+from time import gmtime, ticks_diff
+from movimento import ease_in_out
 from config import BANDAS_ESPECTRO, FAIXA_AMARELA_PX, QUADRO_MS
 
 # Desenho procedural em 128x64, sem bitmaps na flash.
-CICLO_MS = 6400
+CICLO_MS = 19_200
 # O logo de 10 pixels se move apenas na área azul.
 CURSO_Y_DVD = 64 - FAIXA_AMARELA_PX - 10
-PERIODO_Y_DVD = 2 * (CURSO_Y_DVD + 1)
-CICLO_DVD_MS = 87 * PERIODO_Y_DVD * QUADRO_MS
+CICLO_DVD_MS = 86 * CURSO_Y_DVD * QUADRO_MS * 2
 INICIO_TITULO = 36
 LARGURA_TITULO = 128 - INICIO_TITULO
 AREA_TITULO = FrameBuffer(bytearray(LARGURA_TITULO), LARGURA_TITULO, 8, MONO_VLSB)
@@ -28,26 +29,50 @@ def desenhar_logo_nenza(oled, x, y):
     oled.text("NENZA", x + 1, y + 1)
 
 
+class AudioVisual:
+    def __init__(self):
+        self.bandas = [0.0] * BANDAS_ESPECTRO
+        self.nivel = 0.0
+        self.ultimo = 0
+
+    def reiniciar(self, agora):
+        self.ultimo = agora
+        self.nivel = 0.0
+        for i in range(BANDAS_ESPECTRO):
+            self.bandas[i] = 0.0
+
+    def atualizar(self, vu, agora):
+        dt = max(0, ticks_diff(agora, self.ultimo))
+        self.ultimo = agora
+        ataque = dt / (dt + 45)
+        queda = dt / (dt + 160)
+        self.nivel += (vu.nivel - self.nivel) * (ataque if vu.nivel > self.nivel else queda)
+        for i in range(BANDAS_ESPECTRO):
+            alvo = vu.bandas[i] if vu.bandas is not None else 0
+            valor = self.bandas[i]
+            self.bandas[i] = valor + (alvo - valor) * (ataque if alvo > valor else queda)
+
+    def tem_bandas(self):
+        return any(valor >= 0.2 for valor in self.bandas)
+
+
 def desenhar_vu(oled, nivel, pico, conectado):
     oled.fill(0)
     rodape = 64 - FAIXA_AMARELA_PX
-    oled.rect(0, rodape, 128, FAIXA_AMARELA_PX, 1)
     oled.text("VU USB", 4, rodape + 4)
     if conectado:
-        valor = "{:2d}/10".format(nivel)
-        oled.text(valor, 84, rodape + 4)
+        oled.text("{:2d}/10".format(round(nivel)), 84, rodape + 4)
         for indice in range(10):
-            x = 5 + 12 * indice
-            altura = 8 + 3 * indice
-            y = 43 - altura
-            if indice < nivel:
-                oled.fill_rect(x, y, 10, altura, 1)
+            x = 7 + 12 * indice
+            altura = int((8 + 3 * indice) * max(0, min(1, nivel - indice)))
+            if altura:
+                oled.fill_rect(x, 43 - altura, 7, altura, 1)
             else:
-                oled.rect(x, y, 10, altura, 1)
+                oled.hline(x, 42, 7, 1)
             if indice + 1 == pico:
-                oled.hline(x, y - 2, 10, 1)
+                oled.hline(x, 33 - 3 * indice, 7, 1)
     else:
-        oled.text("AGUARDANDO USB", 8, 22)
+        oled.text("Aguardando USB", 8, 22)
     oled.show()
 
 
@@ -90,22 +115,26 @@ def desenhar_espectro(oled, bandas, conectado, minuto_utc, titulo, deslocamento)
     if bandas is not None:
         base = 62
         for indice in range(BANDAS_ESPECTRO):
-            altura = bandas[indice] * (base - 10) // 10
+            altura = int(bandas[indice] * (base - 12) / 10)
             if altura:
-                oled.fill_rect(5 + 10 * indice, base - altura, 8, altura, 1)
+                x = 5 + 10 * indice
+                oled.hline(x + 1, base - altura, 5, 1)
+                if altura > 1:
+                    oled.fill_rect(x, base - altura + 1, 7, altura - 1, 1)
     else:
-        mensagem = "SEM ESPECTRO" if conectado else "AGUARDANDO USB"
+        mensagem = "Sem espectro" if conectado else "Aguardando USB"
         oled.text(mensagem, (128 - len(mensagem) * 8) // 2, 18)
     oled.show()
 
 
+def reflexo(posicao, limite):
+    passo = posicao % (2 * limite)
+    return min(passo, 2 * limite - passo)
+
+
 def desenhar_nenza_dvd(oled, fase):
-    quadro = fase // QUADRO_MS
-    # Reflete a posicao nos limites de um logo de 42 por 10 pixels.
-    x = (10 + 2 * quadro) % 174
-    y = (10 + quadro) % PERIODO_Y_DVD
-    x = min(x, 173 - x)
-    y = FAIXA_AMARELA_PX + min(y, PERIODO_Y_DVD - 1 - y)
+    x = reflexo(10 + fase * 2 // QUADRO_MS, 86)
+    y = FAIXA_AMARELA_PX + reflexo(10 + fase // QUADRO_MS, CURSO_Y_DVD)
     oled.fill(0)
     desenhar_logo_nenza(oled, x, y)
     oled.show()
@@ -115,13 +144,13 @@ def desenhar_onda(oled, pontos, conectado, minuto_utc):
     oled.fill(0)
     desenhar_relogio(oled, minuto_utc)
     if pontos is None:
-        mensagem = "SEM ONDA" if conectado else "AGUARDANDO USB"
+        mensagem = "Sem onda" if conectado else "Aguardando USB"
         oled.text(mensagem, (128 - len(mensagem) * 8) // 2, 34)
     else:
         topo = FAIXA_AMARELA_PX
         amplitude = (63 - topo) // 2
         centro = topo + amplitude + 1
-        for x in range(0, 128, 4):
+        for x in range(2, 128, 8):
             oled.pixel(x, centro, 1)
 
         x_anterior = 0
@@ -135,6 +164,8 @@ def desenhar_onda(oled, pontos, conectado, minuto_utc):
 
 
 def desenhar_gato(oled, fase, dormindo):
+    respiracao = round(2 * sin(fase * 6.283 / 3200))
+    ciclo, fase = divmod(fase, 6400)
     if fase < 1500:
         olhar = 0
     elif fase < 3000:
@@ -144,16 +175,21 @@ def desenhar_gato(oled, fase, dormindo):
     else:
         olhar = min(0, -9 + (fase - 4650) // 35)
 
-    raio_y = 1 if dormindo else 13
+    if ciclo == 1:
+        olhar = -olhar
+    elif ciclo == 2:
+        olhar //= 2
+    raio_y = 1 if dormindo else 12 + respiracao // 2
     if not dormindo:
         for piscada in (1140, 3810, 4100, 5680):
-            distancia = abs(fase - piscada)
+            distancia = abs(fase - piscada - 240 * ciclo)
             raio_y = min(raio_y, max(1, (distancia - 20) // 6))
 
     oled.fill(0)
 
     # Orelhas e interior das orelhas.
     for x, lado in ((17, 1), (110, -1)):
+        x += respiracao * lado
         oled.line(x, 15, x + lado * 3, 2, 1)
         oled.line(x + lado * 3, 2, x + lado * 22, 15, 1)
         oled.line(x + lado * 6, 7, x + lado * 13, 13, 1)
@@ -164,12 +200,12 @@ def desenhar_gato(oled, fase, dormindo):
             oled.hline(x - 8, 37, 17, 1)
             oled.line(x + 8, 37, x + 19, 33, 1)
         else:
-            oled.ellipse(x, 33, 22, raio_y, 1, True)
+            oled.ellipse(x, 33 + respiracao, 22, raio_y, 1, True)
             pupila = x + olhar
-            oled.ellipse(pupila, 33, 4, raio_y - 1, 0, True)
+            oled.ellipse(pupila, 33 + respiracao, 4, raio_y - 1, 0, True)
             if raio_y >= 7:
-                oled.fill_rect(pupila - 2, 28, 3, 3, 1)
-                oled.pixel(pupila + 2, 35, 1)
+                oled.fill_rect(pupila - 2, 28 + respiracao, 3, 3, 1)
+                oled.pixel(pupila + 2, 35 + respiracao, 1)
 
     # Nariz, boca e bigodes.
     oled.hline(60, 47, 7, 1)
@@ -189,4 +225,76 @@ def desenhar_gato(oled, fase, dormindo):
         subida = fase % 1600 // 100
         oled.text("Z", 67 + subida // 2, FAIXA_AMARELA_PX + 7 - subida // 2, 1)
 
+    oled.show()
+
+
+
+def desenhar_boot(oled, fase):
+    oled.fill(0)
+    abertura = ease_in_out(min(1, fase / 570))
+    raio = int(25 * abertura)
+    y = 28 + int(5 * (1 - abertura))
+    if raio:
+        oled.ellipse(64, y, raio, max(1, int(10 * abertura)), 1)
+    if fase >= 240:
+        desenhar_logo_nenza(oled, 43, y - 5)
+        visivel = int(21 * ease_in_out(min(1, (fase - 240) / 410)))
+        margem = 21 - visivel
+        if margem:
+            oled.fill_rect(43, y - 5, margem, 10, 0)
+            oled.fill_rect(85 - margem, y - 5, margem, 10, 0)
+    if fase >= 560:
+        oled.text("Nenza Corp", 24, 49)
+    oled.show()
+
+
+def desenhar_ambiente(oled, animacao, fase):
+    oled.fill(0)
+    t = fase * 6.283185 / 24_000
+    if animacao == 5:  # Particulas com velocidades e orbitas diferentes.
+        for i in range(19):
+            x = (i * 37 + int(6 * sin(t * (i % 3 + 1) + i))) % 128
+            y = (i * 21 - fase * (i % 3 + 1) * 64 // 24_000) % 64
+            oled.pixel(x, y, 1)
+            if i % 4 == 0:
+                oled.pixel(x + 1, y, 1)
+                oled.pixel(x, y + 1, 1)
+    elif animacao == 6:  # Estrelas aceleram do centro para as bordas.
+        for i in range(26):
+            z = ((fase * (1 + i % 2) + i * 1471) % 4800) / 4800
+            x = 64 + int(((i * 41 % 129) - 64) * z * z)
+            y = 32 + int(((i * 29 % 65) - 32) * z * z)
+            oled.pixel(x, y, 1)
+            if z > 0.8:
+                oled.pixel(x + 1, y, 1)
+    elif animacao == 7:
+        for i in range(3):
+            anterior = 0
+            for x in range(0, 128, 4):
+                y = 15 + i * 16 + int(6 * sin(x / 17 + t * 4 + i))
+                if x:
+                    oled.line(x - 4, anterior, x, y, 1)
+                anterior = y
+    elif animacao == 8:
+        for i in range(3):
+            x = 63 + int(42 * sin(t * (i + 1) + i * 2))
+            y = 31 + int(18 * sin(t * (i + 2) + i))
+            if i == 1:
+                oled.line(x - 8, y, x, y - 8, 1)
+                oled.line(x, y - 8, x + 8, y, 1)
+                oled.line(x + 8, y, x, y + 8, 1)
+                oled.line(x, y + 8, x - 8, y, 1)
+            else:
+                oled.ellipse(x, y, 8 + i * 2, 8, 1, i == 2)
+    elif animacao == 9:
+        altura = min(13, max(1, abs(fase % 3600 - 1700) // 14))
+        olhar = int(7 * sin(t * 5))
+        for x in (40, 88):
+            oled.ellipse(x, 31, 15, altura, 1, True)
+            if altura > 2:
+                oled.ellipse(x + olhar, 31, 4, altura - 2, 0, True)
+    else:
+        pulso = (1 + sin(t * 6)) / 2
+        oled.ellipse(64, 32, 23 + int(pulso * 11), 10 + int(pulso * 7), 1)
+        desenhar_logo_nenza(oled, 43, 27)
     oled.show()

@@ -2,7 +2,6 @@ from machine import I2C, Pin
 from struct import unpack
 from time import ticks_add, ticks_diff
 
-from config import AMOSTRAS
 from clima import ResumoClima
 
 
@@ -49,8 +48,6 @@ class HistoricoBMP280:
         self.sensor = None
         self.proxima_leitura = agora
         self.atual = (None, None)
-        self.revisao = 0
-        self.historico = [None] * AMOSTRAS
         self.resumo = ResumoClima(agora)
 
     def atualizar(self, agora):
@@ -59,7 +56,7 @@ class HistoricoBMP280:
         self.proxima_leitura = ticks_add(agora, 1000)
         try:
             if self.i2c is None:
-                self.i2c = I2C(0, scl=Pin(22), sda=Pin(21), freq=100_000, timeout=10_000)
+                self.i2c = I2C(0, scl=Pin(27), sda=Pin(32), freq=100_000, timeout=10_000)
             if self.sensor is None:
                 self.sensor = BMP280(self.i2c)
                 # Aguarda a primeira conversao sem pausar o loop da interface.
@@ -68,13 +65,4 @@ class HistoricoBMP280:
         except (OSError, ValueError):
             self.sensor = None
             self.atual = (None, None)
-        self.historico[self.revisao % AMOSTRAS] = self.atual
-        self.revisao += 1
         self.resumo.registrar(agora, self.atual)
-
-    def copiar_metrica(self, metrica, destino):
-        quantidade = min(self.revisao, AMOSTRAS)
-        primeiro = self.revisao - quantidade
-        for indice in range(quantidade):
-            destino[indice] = self.historico[(primeiro + indice) % AMOSTRAS][metrica]
-        return self.revisao, quantidade

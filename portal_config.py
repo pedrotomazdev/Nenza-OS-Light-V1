@@ -114,6 +114,7 @@ def executar(oled):
     import network
     import os
     from machine import reset
+    from telas import ICONES_MENU, desenhar_icone, texto_centro
 
     os.stat("/index.html")
     ssid = "Nenza-Config"
@@ -132,11 +133,12 @@ def executar(oled):
         servidor.settimeout(1)
 
         oled.fill(0)
-        oled.text("CONFIG WIFI", 0, 4)
-        oled.text(ssid, 0, 19)
-        oled.text("Senha da rede:", 0, 28)
-        oled.text(senha, 0, 37)
-        oled.text(ip, 0, 53)
+        desenhar_icone(oled, ICONES_MENU["wifi"], 5, 3, 1)
+        oled.text("Config Wi-Fi", 18, 3)
+        texto_centro(oled, ssid, 17)
+        oled.text("Senha", 5, 31)
+        texto_centro(oled, senha, 42)
+        texto_centro(oled, ip, 55)
         oled.show()
 
         prazo = ticks_add(ticks_ms(), 300_000)
@@ -157,8 +159,8 @@ def executar(oled):
 
         if gravou:
             oled.fill(0)
-            oled.text("CONFIG SALVA", 0, 18)
-            oled.text("Reiniciando...", 0, 36)
+            texto_centro(oled, "Config salva", 20)
+            texto_centro(oled, "Reiniciando...", 37)
             oled.show()
             sleep_ms(1200)
     finally:

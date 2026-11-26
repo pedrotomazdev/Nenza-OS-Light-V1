@@ -15,24 +15,7 @@ def consultar_api(endereco, requisicao):
 
 
 def ler_corpo(conexao, requisicao):
-    conexao.write(requisicao)
-    status = conexao.readline().split()
-    if len(status) < 2 or status[1] != b"200":
-        raise ValueError("Resposta HTTP: {}".format(status[1] if len(status) >= 2 else status))
-
-    tamanho = None
-    em_blocos = False
-    while True:
-        linha = conexao.readline()
-        if linha == b"\r\n":
-            break
-        if not linha:
-            raise ValueError("Cabecalho incompleto")
-        nome, _, valor = linha.partition(b":")
-        if nome.lower() == b"content-length":
-            tamanho = int(valor)
-        elif nome.lower() == b"transfer-encoding":
-            em_blocos = b"chunked" in valor.lower()
+    tamanho, em_blocos = ler_cabecalho(conexao, requisicao)
 
     if em_blocos:
         corpo = bytearray()
@@ -57,3 +40,26 @@ def ler_corpo(conexao, requisicao):
     if not corpo or len(corpo) != tamanho:
         raise ValueError("Resposta incompleta")
     return corpo
+
+
+def ler_cabecalho(conexao, requisicao):
+    conexao.write(requisicao)
+    status = conexao.readline().split()
+    if len(status) < 2 or status[1] != b"200":
+        raise ValueError("Resposta HTTP: {}".format(status[1] if len(status) >= 2 else status))
+
+    tamanho = None
+    em_blocos = False
+    while True:
+        linha = conexao.readline()
+        if linha == b"\r\n":
+            break
+        if not linha:
+            raise ValueError("Cabecalho incompleto")
+        nome, _, valor = linha.partition(b":")
+        if nome.lower() == b"content-length":
+            tamanho = int(valor)
+        elif nome.lower() == b"transfer-encoding":
+            em_blocos = b"chunked" in valor.lower()
+
+    return tamanho, em_blocos

@@ -1,63 +1,6 @@
 from machine import Pin
 from time import ticks_diff
-from config import DEBOUNCE_MS, DIAGNOSTICO_ENCODER, TOQUE_LONGO_MS
-
-
-class EncoderRotativo:
-    TRANSICOES_POR_PASSO = 2
-    # Linhas: estado anterior. Colunas: estado atual (A << 1 | B).
-    TRANSICOES = (
-        (0, 1, -1, 0),
-        (-1, 0, 0, 1),
-        (1, 0, 0, -1),
-        (0, -1, 1, 0),
-    )
-
-    def __init__(self, gpio_a, gpio_b):
-        self.a = Pin(gpio_a, Pin.IN, Pin.PULL_UP)
-        self.b = Pin(gpio_b, Pin.IN, Pin.PULL_UP)
-        self.anterior = (self.a.value() << 1) | self.b.value()
-        self.parcial = 0
-        self.posicao = 0
-        self.ultima_posicao = 0
-        self.validas = 0
-        self.invalidas = 0
-        self.ultimo_log = None
-        self.estado_log = None
-
-    def atualizar(self):
-        atual = (self.a.value() << 1) | self.b.value()
-        if atual == self.anterior:
-            return
-        passo = self.TRANSICOES[self.anterior][atual]
-        self.anterior = atual
-        if not passo:
-            if DIAGNOSTICO_ENCODER:
-                self.invalidas += 1
-            self.parcial = 0
-            return
-        if DIAGNOSTICO_ENCODER:
-            self.validas += 1
-        self.parcial += passo
-        if abs(self.parcial) == self.TRANSICOES_POR_PASSO:
-            self.posicao += passo
-            self.parcial = 0
-
-    def ler_passos(self):
-        posicao = self.posicao
-        passos = posicao - self.ultima_posicao
-        self.ultima_posicao = posicao
-        return passos
-
-    def mostrar_diagnostico(self, agora):
-        if self.ultimo_log is not None and ticks_diff(agora, self.ultimo_log) < 200:
-            return
-        self.ultimo_log = agora
-        estado = (self.a.value(), self.b.value(), self.validas, self.invalidas,
-                  self.parcial, self.posicao)
-        if estado != self.estado_log:
-            self.estado_log = estado
-            print("[ENCODER] A={} B={} validas={} invalidas={} parcial={} posicao={}".format(*estado))
+from config import DEBOUNCE_MS, TOQUE_LONGO_MS
 
 
 class Botao:
@@ -110,3 +53,39 @@ def salvar_config(nvs, chave, valor):
         nvs.commit()
     except OSError as erro:
         print("Configuracoes:", erro)
+
+
+class Encoder:
+    # A e B formam um codigo Gray. Mudancas invalidas nao geram passos.
+    DELTAS = (0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0)
+
+    def __init__(self, pinos, transicoes):
+        self.a = Pin(pinos[0], Pin.IN, Pin.PULL_UP)
+        self.b = Pin(pinos[1], Pin.IN, Pin.PULL_UP)
+        self.estado = self.a.value() * 2 + self.b.value()
+        self.transicoes = transicoes
+        self.contagem = self.lido = self.parcial = 0
+        bordas = Pin.IRQ_RISING | Pin.IRQ_FALLING
+        self.a.irq(self._mudou, bordas)
+        self.b.irq(self._mudou, bordas)
+
+    def _mudou(self, pin):
+        estado = self.a.value() * 2 + self.b.value()
+        if estado == self.estado:
+            return
+        delta = self.DELTAS[self.estado * 4 + estado]
+        self.estado = estado
+        self.parcial = self.parcial + delta if delta else 0
+        if self.parcial == self.transicoes:
+            self.contagem = (self.contagem + 1) & 0xffff
+            self.parcial = 0
+        elif self.parcial == -self.transicoes:
+            self.contagem = (self.contagem - 1) & 0xffff
+            self.parcial = 0
+
+    def ler(self):
+        # O callback escreve apenas contagem e o loop escreve apenas lido.
+        contagem = self.contagem
+        passos = ((contagem - self.lido + 32768) & 0xffff) - 32768
+        self.lido = contagem
+        return passos

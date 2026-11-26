@@ -1,13 +1,16 @@
-# Nenza ESP32 — Painel embarcado Nenza Corp
+# Nenza OS Light 1.2 — Painel embarcado Nenza Corp
 
-Firmware em **MicroPython** para uma **ESP32 DevKit V1** com display OLED SSD1306 de 128 × 64 pixels e três botões. A placa monitora o **NenzaHub**, executa ações do **Ultimate Nenza** e oferece gráficos, modo foco e animações.
+Firmware em **MicroPython** para uma **ESP32 DevKit V1** com display OLED SSD1306 de 128 × 64 pixels e dois botões por padrão. Um terceiro botão e um encoder podem ser configurados. A placa monitora o **NenzaHub**, executa ações do **Ultimate Nenza** e oferece gráficos, modo foco e animações.
 
 > **Estado desta versão** — Firmware modular com validação em computador. Os testes na ESP32 e as medições de memória estão pendentes.
 
 ## Alterações desta versão
 
-- Data e hora de Brasília abaixo da logo na tela inicial. O relógio sincroniza via NTP quando há internet e mostra traços enquanto a data do RTC ainda estiver indisponível.
-- Tela inicial com a logo Nenza centralizada e indicadores de RAM do servidor e ping no topo. Qualquer botão abre o menu a partir da tela inicial ou do descanso de tela.
+- A abertura da Nenza dura até 920 ms antes de revelar o painel. Entradas físicas interrompem a abertura.
+- O motor usa o tempo decorrido e limita a atualização do OLED a até 25 quadros/s. A composição das transições reserva dois buffers de 1 KiB.
+
+- O relógio de Brasília sincroniza via NTP quando há internet e mostra traços enquanto a data do RTC estiver indisponível.
+- Painel com relógio ampliado, logo Nenza, bateria do NenzaHub, conexão, ping, temperatura e pressão do BMP280. Qualquer botão abre o menu a partir da tela inicial ou do descanso de tela.
 - Firmware dividido em módulos de configuração, periféricos, telas, animações, monitoramento e transporte HTTP. A thread de rede continua separada do loop do OLED.
 - Gráficos com buffer circular de 60 amostras e reutilização do buffer de desenho. O cliente HTTP fecha o socket antes de decodificar o JSON. O diagnóstico de memória pode ser ativado em `config.py`.
 - Portal Wi-Fi acessível em **Configurações → Configurar Wi-Fi**. O OLED mostra a rede, a senha temporária e o IP. O formulário salva a configuração em `secrets.json`, com `secrets.py` como reserva.
@@ -36,15 +39,15 @@ Os nomes dos comandos são enviados conforme os identificadores definidos em `ME
 
 ### Interface e recursos locais
 
-- A tela inicial exibe temperatura ambiente em °C e pressão atmosférica em hPa, medidas pelo BMP280. Traços indicam uma leitura indisponível.
-- Em **Gráficos**, navegue até **TEMP AMB** e **PRESS** para ver as 60 últimas amostras, coletadas a cada segundo mesmo sem Wi-Fi.
-- Em **Clima**, use os botões 1 e 2 ou o encoder para navegar entre a tendência de pressão de 1 h e 3 h, altitude estimada, taxa térmica em °C/h, estatísticas de temperatura e pressão de 24 h e o indicador experimental. O botão 3 retorna ao menu.
-- Menu OLED com ícones de 8 × 8 pixels e atualização direta ao mudar de item.
-- Navegação por três botões físicos e suporte a pressionamento longo do terceiro botão.
+- O painel exibe temperatura local em °C e pressão local em hPa. Traços indicam leituras indisponíveis.
+- Em **Gráficos**, navegue até **TEMP AMB** e **PRESS** para ver os 60 pontos mais recentes do BMP280 armazenados em `/api/meteorologia/historico`. A ESP32 consulta o histórico a cada minuto no host do NenzaHub, na porta `WEATHER_PORT` (8084 por padrão), e mantém os últimos pontos recebidos se a consulta falhar.
+- Em **Clima**, use os botões 1 e 2 para navegar entre a tendência de pressão de 1 h e 3 h, altitude estimada, taxa térmica em °C/h, estatísticas de temperatura e pressão de 24 h e o indicador experimental. Segure o botão 2 para voltar ao menu.
+- Menu em carrossel com ícones em pixel art, transições entre telas e navegação durante o movimento.
+- Navegação por dois botões físicos, com ações de toque curto e longo.
 - Favoritos persistentes para atalhos de comandos do PC.
-- Configurações persistentes por **NVS**: volume, animação, cor do LED, música de boot e favorito.
+- Animação de descanso e favorito persistentes por **NVS**.
 - Temporizador de foco de **25 minutos**.
-- Descanso de tela após **60 segundos** de inatividade. Em **Configurações → Animação**, escolha GATINHO, NENZA DVD, VU USB, ESPECTRO USB ou ONDA USB. Confirme com o botão central para salvar.
+- Descanso de tela após **60 segundos** de inatividade. Em **Configurações → Animação**, escolha Gatinho, Nenza DVD, VU USB, Espectro USB, Onda USB, Partículas, Estrelas, Ondas, Geometria, Olhos ou Logo. Segure o botão 2 para salvar.
 
 ### Métricas de clima
 
@@ -68,13 +71,10 @@ A tabela reflete **os pinos usados pelo firmware**; confira as ligações físic
 | --- | --- | --- |
 | OLED SSD1306 — SDA | **5** | `SoftI2C`, endereço `0x3C` |
 | OLED SSD1306 — SCL | **18** | `SoftI2C`, 400 kHz |
-| BMP280 — SDA | **21** | `I2C(0)`, endereço `0x76` |
-| BMP280 — SCL | **22** | `I2C(0)`, 100 kHz |
-| Botão 1 | **33** | Entrada com `PULL_UP` |
-| Botão 2 | **27** | Entrada com `PULL_UP` |
-| Botão 3 | **26** | Entrada com `PULL_UP` |
-| Encoder A | **4** | Entrada com `PULL_UP` |
-| Encoder B | **15** | Entrada com `PULL_UP` |
+| BMP280 — SDA | **32** | `I2C(0)`, endereço `0x76` |
+| BMP280 — SCL | **27** | `I2C(0)`, 100 kHz |
+| Botão 1 | **25** | Entrada com `PULL_UP` |
+| Botão 2 | **26** | Entrada com `PULL_UP` |
 
 **Observações elétricas:**
 
@@ -84,35 +84,34 @@ A tabela reflete **os pinos usados pelo firmware**; confira as ligações físic
 
 ## Controles
 
-O encoder avança no sentido horário e volta no anti-horário, com um passo de navegação a cada duas transições válidas no mesmo sentido. Gire para abrir o menu a partir do painel ou do descanso de tela. Use o botão 3 para selecionar e confirmar.
+Toque no botão 1 (GPIO25) para ir ao item anterior e no botão 2 (GPIO26) para avançar. Segure por pelo menos 650 ms para usar as ações da tabela. No OLED, `2L` indica toque longo no botão 2.
 
-| Contexto | Botão 1 (GPIO33) | Botão 2 (GPIO27) | Botão 3 (GPIO26) |
-| --- | --- | --- | --- |
-| Menu principal | Item anterior | Próximo item | Abrir/confirmar |
-| Tela inicial ou descanso | Abrir menu | Abrir menu | Abrir menu |
-| Gráficos | Métrica anterior | Próxima métrica | Abrir menu |
-| Clima | Página anterior | Próxima página | Abrir menu |
-| Configurações | Anterior / diminuir | Próximo / aumentar | Editar / confirmar / voltar |
-| Modo foco | — | — | Cancelar / voltar |
-| Ação remota exibida | — | — | Voltar |
+| Contexto | Toque no botão 1 / 2 | Segurar o botão 2 |
+| --- | --- | --- |
+| Tela inicial ou descanso | Abrir menu com qualquer botão | Abrir menu |
+| Menu principal | Item anterior / próximo | Abrir item |
+| Gráficos e Clima | Página anterior / próxima | Voltar ao menu |
+| Configurações | Anterior / próximo ou diminuir / aumentar | Editar, confirmar ou voltar |
+| Modo foco | — | Cancelar |
+| Tela da API ou resultado de comando | Voltar ao menu e navegar | Voltar ao menu |
 
-**Pressionamento longo do botão 3** — Nos gráficos, executa o atalho favorito. No menu principal, define o item selecionado como favorito se ele for um comando elegível.
+Para habilitar o terceiro botão, defina seu GPIO em `GPIO_CONFIRMAR` no `config.py`. Toques nesse botão confirmam, e o atalho longo do botão 2 continua disponível. Configure os pinos A/B do encoder em `GPIO_ENCODER` e o número de transições por passo em `TRANSICOES_ENCODER`. O encoder usa entradas pull-up e navega nos mesmos contextos dos botões 1 e 2.
 
-> O tratamento do botão 3 distingue gestos curtos e longos. Os botões 1 e 2 são tratados como cliques simples.
+Segure o botão 1 no menu para salvar o comando selecionado como favorito. Nos gráficos, segure o botão 1 para executar o favorito.
 
 ## Estrutura do menu
 
 O código define os seguintes itens, nesta ordem:
 
 1. ULTIMATE NENZA
-2. HEALTH API
+2. STATUS NENZAHUB
 3. CPU
 4. MEMORIA
 5. REDE
 6. BATERIA
 7. DISCO
 8. ABRIR CHROME
-9. NENZAHUB
+9. ABRIR NENZAHUB
 10. NENZAHOME
 11. NENZALAB
 12. ABRIR BRAVE
@@ -137,7 +136,9 @@ O código define os seguintes itens, nesta ordem:
 ├── bmp280.py        # Sensor e histórico de temperatura e pressão
 ├── clima.py         # Cálculos e histórico agregado do BMP280
 ├── telas.py         # Menu, telas e gráficos
-├── animacoes.py     # Gatinho e Nenza DVD
+├── movimento.py     # Interpolacao e composicao de transicoes
+├── animacoes.py     # Boot e descansos de tela
+├── vu_serial.py     # Entrada de audio e metadados por USB
 ├── monitor.py       # Wi-Fi, API, comandos e histórico
 ├── http_json.py     # Transporte HTTP e decodificação JSON
 ├── rede_config.py   # Leitura e gravação da configuração de rede
@@ -157,7 +158,7 @@ O driver `ssd1306.py` deve estar disponível na placa, salvo se já estiver incl
 #### Pelo navegador
 
 1. Envie `rede_config.py`, `portal_config.py` e `index.html` para a raiz da placa junto com o firmware.
-2. Abra **Configurações → Configurar Wi-Fi** e confirme com B3. A ESP32 reinicia direto no portal e mostra `CONFIG WIFI` no OLED.
+2. Abra **Configurações → Configurar Wi-Fi** e segure o botão 2 para confirmar. A ESP32 reinicia direto no portal e mostra `CONFIG WIFI` no OLED.
 3. Conecte-se à rede `Nenza-Config` com a senha temporária exibida no OLED. Mantenha a conexão se o celular avisar que a rede está sem internet.
 4. Abra no navegador `http://` seguido do IP exibido no OLED. Preencha o Wi-Fi e a URL HTTP do NenzaHub. Para habilitar comandos do PC, preencha o host e o token juntos.
 5. Toque em **Salvar e reiniciar**. A placa grava `/secrets.json` e reinicia. Se a nova configuração falhar, volte a **Configurar Wi-Fi** no menu e corrija os campos.
@@ -219,7 +220,7 @@ Este JSON é **ilustrativo**, elaborado a partir dos campos acessados pelo códi
 3. Envie primeiro os novos módulos listados acima. Mantenha as cópias de `secrets.py` e `ssd1306.py` já instaladas, se funcionais. Envie o novo ponto de entrada como `main_novo.py`.
 4. No REPL, execute `import main_novo; main_novo.main()` e faça os testes abaixo. Após o teste, interrompa a aplicação e faça um reset para encerrar a thread de teste antes de executar novamente. O reset ainda inicializará o firmware anterior.
 5. Com a nova versão validada, interrompa o firmware anterior, renomeie `main.py` para `main_anterior.py` e `main_novo.py` para `main.py`. Reinicie a placa e valide a inicialização automática.
-6. Para restaurar, interrompa o novo firmware pelo REPL, renomeie o novo `main.py` e devolva `main_anterior.py` ao nome `main.py`. Reinicie. O procedimento usa o sistema de arquivos e preserva o firmware MicroPython e a NVS.
+6. Para restaurar, interrompa o novo firmware pelo REPL, renomeie o novo `main.py`, restaure os módulos da mesma versão do backup e devolva `main_anterior.py` ao nome `main.py`. Reinicie. O procedimento usa o sistema de arquivos e preserva o firmware MicroPython e a NVS.
 
 ### Validação na placa
 

@@ -10,9 +10,16 @@ TOQUE_LONGO_MS = 650
 GRAFICOS_REDE = (("PING", " ms"), ("CPU", " C"), ("RAM", "%"))
 GRAFICOS = GRAFICOS_REDE + (("TEMP AMB", " C"), ("PRESS", " hPa"))
 TITULOS = ("NENZAHUB", "CPU", "MEMORIA", "REDE", "BATERIA", "DISCO")
-ANIMACOES = ("GATINHO", "NENZA DVD", "VU USB", "ESPECTRO USB", "ONDA USB")
+ANIMACOES = (
+    "Gatinho", "Nenza DVD", "VU USB", "Espectro USB", "Onda USB",
+    "Particulas", "Estrelas", "Ondas", "Geometria", "Olhos", "Logo",
+)
 BANDAS_ESPECTRO = 12
 PONTOS_ONDA = 64
 QUADRO_ESPECTRO_MS = 40
 DIAGNOSTICO_MEMORIA = False
-DIAGNOSTICO_ENCODER = True
+# Controles do checkout local; use None para manter entradas extras desativadas.
+GPIO_BOTOES = (25, 26)
+GPIO_CONFIRMAR = None
+GPIO_ENCODER = None  # Exemplo: (4, 15), se livres na sua placa.
+TRANSICOES_ENCODER = 2
